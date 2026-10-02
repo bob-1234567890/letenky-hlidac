@@ -1,0 +1,47 @@
+name: Hlídač letenek PRG–HAN
+
+on:
+  schedule:
+    - cron: "13 5 * * *"   # denně cca 7:13 pražského času (6:13 v zimě)
+  workflow_dispatch: {}      # ruční spuštění tlačítkem "Run workflow"
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency: hlidac
+
+jobs:
+  hlidej:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Zjisti ceny
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python hlidac.py
+
+      - name: Upozornění přes GitHub issue (přijde i e-mailem)
+        if: hashFiles('upozorneni.md') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="$(head -n1 upozorneni.md)"
+          tail -n +3 upozorneni.md > body.md
+          gh issue create --title "$title" --body-file body.md --assignee "${{ github.repository_owner }}"
+          rm -f upozorneni.md body.md
+
+      - name: Ulož historii cen
+        if: always()
+        run: |
+          git config user.name "hlidac-bot"
+          git config user.email "hlidac-bot@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "Ceny $(date -u +%F)"
+          git push
